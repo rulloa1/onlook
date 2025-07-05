@@ -1,5 +1,5 @@
-import type { ProjectManager } from '@/components/store/project/manager';
-import { DEFAULT_COLOR_NAME } from '@onlook/constants';
+
+import { DEFAULT_COLOR_NAME, TAILWIND_WEB_COLORS } from '@onlook/constants';
 import type {
     ClassReplacement,
     ColorUpdate,
@@ -24,7 +24,6 @@ import { getOidFromJsxElement } from '@onlook/parser/src/code-edit/helpers';
 import { Color } from '@onlook/utility';
 import { camelCase } from 'lodash';
 import { makeAutoObservable } from 'mobx';
-import colors from 'tailwindcss/colors';
 import type { EditorEngine } from '../engine';
 import {
     addTailwindCssVariable,
@@ -50,18 +49,11 @@ export class ThemeManager {
 
     constructor(
         private editorEngine: EditorEngine,
-        private projectManager: ProjectManager,
     ) {
         makeAutoObservable(this);
     }
 
     async scanConfig() {
-        const project = this.projectManager.project;
-        if (!project) {
-            console.error('No project found');
-            return;
-        }
-
         try {
             const configResult = await this.scanTailwindConfig();
 
@@ -253,10 +245,10 @@ export class ThemeManager {
         // Create a record instead of an array
         const defaultColorsRecord: Record<string, TailwindColor[]> = {};
 
-        Object.keys(colors)
+        Object.keys(TAILWIND_WEB_COLORS)
             .filter((colorName) => !excludedColors.includes(colorName))
             .forEach((colorName) => {
-                const defaultColorScale = colors[colorName as keyof typeof colors];
+                const defaultColorScale = TAILWIND_WEB_COLORS[colorName as keyof typeof TAILWIND_WEB_COLORS];
 
                 if (typeof defaultColorScale !== 'object' || defaultColorScale === null) {
                     return;
@@ -272,8 +264,8 @@ export class ThemeManager {
                         return {
                             name: shade,
                             originalKey: `${colorName}-${shade}`,
-                            lightColor: lightModeValue ?? defaultValue,
-                            darkColor: darkModeValue ?? defaultValue,
+                            lightColor: lightModeValue ?? String(defaultValue),
+                            darkColor: darkModeValue ?? String(defaultValue),
                             line: {
                                 config: config[`${colorName}-${shade}`]?.line,
                                 css: {
@@ -318,16 +310,10 @@ export class ThemeManager {
                 // Add to record instead of array
                 defaultColorsRecord[colorName] = colorItems;
             });
-
         return defaultColorsRecord;
     }
 
     async rename(oldName: string, newName: string) {
-        const project = this.projectManager.project;
-        if (!project) {
-            return;
-        }
-
         try {
             await this.updateTailwindColorConfig(oldName, newName, SystemTheme.LIGHT);
 
@@ -356,7 +342,7 @@ export class ThemeManager {
             if (originalKey) {
                 const [parentKey, keyName] = originalKey.split('-');
 
-                const isDefaultColor = parentKey && colors[parentKey as keyof typeof colors];
+                const isDefaultColor = parentKey && TAILWIND_WEB_COLORS[parentKey as keyof typeof TAILWIND_WEB_COLORS];
                 if (isDefaultColor) {
                     const colorIndex = parseInt(keyName ?? '0') / 100;
 
@@ -394,12 +380,6 @@ export class ThemeManager {
     }
 
     async delete(groupName: string, colorName?: string) {
-        const project = this.projectManager.project;
-        if (!project) {
-            console.error('No project found');
-            return;
-        }
-
         try {
             const colorUpdate = await this.initializeTailwindColorContent();
             if (!colorUpdate) {
@@ -514,12 +494,6 @@ export class ThemeManager {
         theme?: SystemTheme,
         shouldSaveToConfig = false,
     ) {
-        const project = this.projectManager.project;
-        if (!project) {
-            console.error('No project found');
-            return;
-        }
-
         try {
             // For new colors, pass empty originalKey and parentName
             const originalGroupName = camelCase(groupName);
@@ -552,11 +526,10 @@ export class ThemeManager {
     }
 
     async add(newName: string) {
-        const project = this.projectManager.project;
-        if (!project || !newName.trim()) {
+        if (!newName.trim()) {
+            console.error('No color name provided');
             return;
         }
-
         try {
             await this.updateTailwindColorConfig('', '#FFFFFF', newName.trim());
             // Refresh colors
@@ -572,10 +545,6 @@ export class ThemeManager {
         newColor: Color,
         theme?: SystemTheme,
     ) {
-        const project = this.projectManager.project;
-        if (!project) {
-            return;
-        }
         try {
             await this.updateTailwindColorConfig(
                 `${colorFamily}-${index * 100}`,
@@ -597,12 +566,6 @@ export class ThemeManager {
         isDefaultPalette?: boolean,
         theme?: SystemTheme,
     ) {
-        const project = this.projectManager.project;
-        if (!project) {
-            console.error('No project found');
-            return;
-        }
-
         try {
             if (isDefaultPalette) {
                 const colorToDuplicate = this.defaultColors[groupName];
@@ -691,6 +654,7 @@ export class ThemeManager {
         }
 
         const defaultGroup = this.defaultColors[groupName];
+
         if (defaultGroup && shadeName) {
             const color = defaultGroup.find((color) => color.name === shadeName);
             if (color?.lightColor) {

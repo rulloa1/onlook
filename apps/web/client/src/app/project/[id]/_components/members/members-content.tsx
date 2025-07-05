@@ -1,13 +1,13 @@
-import { InvitationRow } from './invitation-row';
-
-import { MemberRow } from './member-row';
-
+import { useEditorEngine } from '@/components/store/editor';
 import { api } from '@/trpc/react';
-
+import { InvitationRow } from './invitation-row';
 import { InviteMemberInput } from './invite-member-input';
+import { MemberRow } from './member-row';
 import { SuggestedTeammates } from './suggested-teammates';
 
-export const MembersContent = ({ projectId }: { projectId: string }) => {
+export const MembersContent = () => {
+    const editorEngine = useEditorEngine();
+    const projectId = editorEngine.projectId;
     const { data: members, isLoading: loadingMembers } = api.member.list.useQuery({
         projectId,
     });
@@ -16,8 +16,7 @@ export const MembersContent = ({ projectId }: { projectId: string }) => {
     });
 
     if (loadingMembers && loadingInvitations) {
-        // TODO: Add skeleton
-        return null;
+        return <div className="p-3 text-muted-foreground text-sm">Loading...</div>;
     }
 
     return (
@@ -27,7 +26,7 @@ export const MembersContent = ({ projectId }: { projectId: string }) => {
             </div>
             <InviteMemberInput projectId={projectId} />
             {members?.map((member) => (
-                <MemberRow key={member.userId} user={member.user} role={member.role} />
+                <MemberRow key={member.user.id} user={member.user} role={member.role} />
             ))}
             {invitations?.map((invitation) => (
                 <InvitationRow key={invitation.id} invitation={invitation} />

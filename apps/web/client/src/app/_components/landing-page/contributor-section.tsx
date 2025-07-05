@@ -1,7 +1,10 @@
 'use client';
 
-import { Icons } from '@onlook/ui/icons/index';
-import React, { useEffect, useState } from 'react';
+import './contributor.css';
+
+import { Icons } from '@onlook/ui/icons';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
 
 interface Contributor {
     login: string;
@@ -11,13 +14,13 @@ interface Contributor {
 
 // Floating Circles: two concentric rings
 const FloatingRings = () => {
-    const [isMd, setIsMd] = React.useState(
-        typeof window !== 'undefined' ? window.matchMedia('(min-width: 768px)').matches : false
-    );
+    const [isMd, setIsMd] = useState(false);
     const [contributors, setContributors] = useState<Contributor[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [mounted, setMounted] = useState(false);
 
-    React.useEffect(() => {
+    useEffect(() => {
+        setMounted(true);
         const media = window.matchMedia('(min-width: 768px)');
         const listener = () => setIsMd(media.matches);
         media.addEventListener('change', listener);
@@ -29,23 +32,27 @@ const FloatingRings = () => {
         const fetchContributors = async () => {
             try {
                 const response = await fetch('https://api.github.com/repos/onlook-dev/onlook/contributors?per_page=100');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch contributors');
+                }
                 const data = await response.json();
-
                 const filteredContributors = data.filter((contributor: Contributor) => {
-                    if (!contributor.avatar_url) return false;
-                    if (contributor.login.includes('[bot]')) return false;
-                    return true;
+                    return contributor.avatar_url && !contributor.login.includes('[bot]');
                 });
                 setContributors(filteredContributors);
-                setIsLoading(false);
             } catch (error) {
                 console.error('Failed to fetch contributors:', error);
+            } finally {
                 setIsLoading(false);
             }
         };
 
         fetchContributors();
     }, []);
+
+    if (!mounted) {
+        return null;
+    }
 
     // Tighter radii for mobile
     const innerRadius = isMd ? 260 * 1.4 : 260;
@@ -60,10 +67,10 @@ const FloatingRings = () => {
     return (
         <div
             className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 aspect-square pointer-events-none"
-            style={{ width: 840, height: 840 }}
+            style={{ width: size, height: size }}
         >
             {/* Inner ring (clockwise) */}
-            <div className="absolute left-1/2 top-1/2" style={{ width: '100%', height: '100%', transform: 'translate(-50%, -50%)', animation: 'spin-normal 280s linear infinite' }}>
+            <div className="absolute left-1/2 top-1/2 w-full h-full spin-normal">
                 {Array.from({ length: innerRingCount }).map((_, i) => {
                     const angle = (i / innerRingCount) * 2 * Math.PI;
                     const x = center + Math.cos(angle) * innerRadius;
@@ -72,13 +79,12 @@ const FloatingRings = () => {
                     return (
                         <div
                             key={`inner-${i}`}
-                            className="absolute rounded-full bg-white/20 border border-foreground-primary/40 border-[0.5px] shadow-lg overflow-hidden"
+                            className="absolute rounded-full bg-white/20 border border-foreground-primary/40 border-[0.5px] shadow-lg overflow-hidden counter-spin"
                             style={{
                                 width: '56px',
                                 height: '56px',
                                 left: `${x - 28}px`,
                                 top: `${y - 28}px`,
-                                animation: 'counter-spin 280s linear infinite',
                                 transformOrigin: 'center center'
                             }}
                         >
@@ -94,8 +100,8 @@ const FloatingRings = () => {
                     );
                 })}
             </div>
-            {/* Outer ring (counter-clockwise) */}
-            <div className="absolute left-1/2 top-1/2" style={{ width: '100%', height: '100%', transform: 'translate(-50%, -50%)', animation: 'spin-reverse 290s linear infinite' }}>
+            {/* Outer ring */}
+            <div className="absolute left-1/2 top-1/2 w-full h-full spin-reverse">
                 {Array.from({ length: outerRingCount }).map((_, i) => {
                     const angle = (i / outerRingCount) * 2 * Math.PI;
                     const x = center + Math.cos(angle) * outerRadius;
@@ -105,13 +111,12 @@ const FloatingRings = () => {
                     return (
                         <div
                             key={`outer-${i}`}
-                            className="absolute rounded-full bg-white/20 border border-foreground-primary/40 border-[0.5px] shadow-lg overflow-hidden"
+                            className="absolute rounded-full bg-white/20 border border-foreground-primary/40 border-[0.5px] shadow-lg overflow-hidden counter-spin-reverse"
                             style={{
                                 width: '56px',
                                 height: '56px',
                                 left: `${x - 28}px`,
                                 top: `${y - 28}px`,
-                                animation: 'counter-spin-reverse 290s linear infinite',
                                 transformOrigin: 'center center'
                             }}
                         >
@@ -172,60 +177,28 @@ export function ContributorSection({
             <div className="w-full max-w-6xl mx-auto relative z-10 flex flex-col items-center justify-center bg-background-onlook rounded-3xl px-12 py-32 shadow-xl overflow-hidden md:[--md-scale:1] [--md-scale:0]" style={{ minWidth: 420 }}>
                 {/* Floating Circles: two concentric rings */}
                 <FloatingRings />
-                <style>{`
-                    @keyframes spin-normal {
-                        from {
-                            transform: translate(-50%, -50%) rotate(0deg);
-                        }
-                        to {
-                            transform: translate(-50%, -50%) rotate(360deg);
-                        }
-                    }
-                    @keyframes spin-reverse {
-                        from {
-                            transform: translate(-50%, -50%) rotate(0deg);
-                        }
-                        to {
-                            transform: translate(-50%, -50%) rotate(-360deg);
-                        }
-                    }
-                    @keyframes counter-spin {
-                        from {
-                            transform: rotate(0deg);
-                        }
-                        to {
-                            transform: rotate(-360deg);
-                        }
-                    }
-                    @keyframes counter-spin-reverse {
-                        from {
-                            transform: rotate(0deg);
-                        }
-                        to {
-                            transform: rotate(360deg);
-                        }
-                    }
-                `}</style>
                 <h2 className="text-foreground-primary text-3xl md:text-4xl font-light text-center mb-2">
                     Supported by You &<br />
                     {isLoading ? '...' : starCount} other builders
                 </h2>
-                <p className="text-foreground-secondary text-regular text-center mb-8 max-w-xl">Join our mission and be a part of changing<br />the way people craft software</p>
+                <p className="text-foreground-secondary text-regular text-center mb-8 max-w-xl">Join the community building <br /> the open source prompt-to-build app</p>
                 <div className="flex gap-4 flex-col md:flex-row w-full justify-center items-center">
-                    <button
-                        onClick={() => window.open(githubLink, '_blank')}
+                    <Link
+                        href={githubLink}
+                        target="_blank"
                         className="bg-foreground-primary text-background-primary text-regularPlus rounded-lg px-6 py-3 flex items-center gap-2 shadow hover:bg-foreground-primary/80 transition cursor-pointer"
                     >
                         Contribute to Onlook
                         <Icons.GitHubLogo className="w-4.5 h-4.5" />
-                    </button>
-                    <button
-                        onClick={() => window.open(discordLink, '_blank')}
+                    </Link>
+                    <Link
+                        href={discordLink}
+                        target="_blank"
                         className="border border-foreground-primary/50 text-foreground-primary text-regularPlus rounded-lg px-6 py-3 flex items-center gap-2 hover:bg-foreground-primary/10 transition cursor-pointer"
                     >
                         Join the Discord
                         <Icons.DiscordLogo className="w-4.5 h-4.5" />
-                    </button>
+                    </Link>
                 </div>
             </div>
         </div>

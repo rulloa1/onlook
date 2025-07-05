@@ -1,28 +1,31 @@
-import { previewDomains } from '@onlook/db';
+import { env } from '@/env';
+import { previewDomains, publishedDomains, toDomainInfoFromPreview } from '@onlook/db';
+import { HostingProvider } from '@onlook/models';
+import { getValidSubdomain } from '@onlook/utility';
 import { TRPCError } from '@trpc/server';
-import { and, eq, ne } from 'drizzle-orm';
-import type { FreestyleDeployWebSuccessResponseV2 } from 'freestyle-sandboxes';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { createTRPCRouter, protectedProcedure } from '../../trpc';
-import { initializeFreestyleSdk } from './freestyle';
+import { HostingProviderFactory } from './hosting-factory';
 
 export const previewRouter = createTRPCRouter({
     get: protectedProcedure.input(z.object({
         projectId: z.string(),
     })).query(async ({ ctx, input }) => {
-        const preview = await ctx.db.query.previewDomains.findMany({
+        const preview = await ctx.db.query.previewDomains.findFirst({
             where: eq(previewDomains.projectId, input.projectId),
         });
-        return preview;
+        return preview ? toDomainInfoFromPreview(preview) : null;
     }),
     create: protectedProcedure.input(z.object({
-        domain: z.string(),
         projectId: z.string(),
     })).mutation(async ({ ctx, input }) => {
         // Check if the domain is already taken by another project
         // This should never happen, but just in case
+        const domain = `${getValidSubdomain(input.projectId)}.${env.NEXT_PUBLIC_HOSTING_DOMAIN}`;
+
         const existing = await ctx.db.query.previewDomains.findFirst({
-            where: and(eq(previewDomains.fullDomain, input.domain), ne(previewDomains.projectId, input.projectId)),
+            where: and(eq(previewDomains.fullDomain, domain), ne(previewDomains.projectId, input.projectId)),
         });
 
         if (existing) {
@@ -33,11 +36,17 @@ export const previewRouter = createTRPCRouter({
         }
 
         const [preview] = await ctx.db.insert(previewDomains).values({
-            fullDomain: input.domain,
+            fullDomain: domain,
             projectId: input.projectId,
-        }).returning({
-            fullDomain: previewDomains.fullDomain,
-        });
+        }).onConflictDoUpdate({
+            target: [previewDomains.fullDomain],
+            set: {
+                projectId: input.projectId,
+            },
+        })
+            .returning({
+                fullDomain: previewDomains.fullDomain,
+            });
 
         if (!preview) {
             throw new TRPCError({
@@ -53,6 +62,7 @@ export const previewRouter = createTRPCRouter({
     publish: protectedProcedure
         .input(
             z.object({
+                type: z.enum(['preview', 'custom']),
                 projectId: z.string(),
                 files: z.record(z.string(), z.object({
                     content: z.string(),
@@ -66,35 +76,49 @@ export const previewRouter = createTRPCRouter({
             }),
         )
         .mutation(async ({ ctx, input }) => {
-            // Check domain ownership permission
-            const preview = await ctx.db.query.previewDomains.findFirst({
-                where: eq(previewDomains.projectId, input.projectId),
-            });
-            if (!preview) {
-                throw new TRPCError({
-                    code: 'BAD_REQUEST',
-                    message: 'No preview domain found',
+            if (input.type === 'preview') {
+                const preview = await ctx.db.query.previewDomains.findFirst({
+                    where: and(
+                        eq(previewDomains.projectId, input.projectId),
+                        inArray(previewDomains.fullDomain, input.config.domains),
+                    ),
                 });
+                if (!preview) {
+                    throw new TRPCError({
+                        code: 'BAD_REQUEST',
+                        message: 'No preview domain found',
+                    });
+                }
+            } else if (input.type === 'custom') {
+                const custom = await ctx.db.query.publishedDomains.findFirst({
+                    where: and(
+                        eq(publishedDomains.projectId, input.projectId),
+                        inArray(publishedDomains.fullDomain, input.config.domains),
+                    ),
+                });
+                if (!custom) {
+                    throw new TRPCError({
+                        code: 'BAD_REQUEST',
+                        message: 'No custom domain found',
+                    });
+                }
             }
 
-            const sdk = initializeFreestyleSdk();
-            const res = await sdk.deployWeb(
-                {
-                    files: input.files,
-                    kind: 'files',
-                },
-                input.config,
-            );
-            const freestyleResponse = (await res) as {
-                message?: string;
-                error?: {
-                    message: string;
+            const adapter = HostingProviderFactory.create(HostingProvider.FREESTYLE);
+
+            const deploymentFiles: Record<string, { content: string; encoding?: 'utf-8' | 'base64' }> = {};
+            for (const [path, file] of Object.entries(input.files)) {
+                deploymentFiles[path] = {
+                    content: file.content,
+                    encoding: (file.encoding === 'base64' ? 'base64' : 'utf-8')
                 };
-                data?: FreestyleDeployWebSuccessResponseV2;
-            };
-            if (!res) {
-                throw new Error(freestyleResponse.error?.message || freestyleResponse.message || 'Unknown error');
             }
-            return freestyleResponse.data?.deploymentId ?? '';
+
+            const result = await adapter.deploy({
+                files: deploymentFiles,
+                config: input.config
+            });
+
+            return result;
         }),
 });

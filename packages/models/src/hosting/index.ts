@@ -1,12 +1,18 @@
-export enum PublishStatus {
-    UNPUBLISHED = 'unpublished',
-    LOADING = 'loading',
-    PUBLISHED = 'published',
-    ERROR = 'error',
+export enum DeploymentType {
+    PREVIEW = 'preview',
+    CUSTOM = 'custom',
+    UNPUBLISH_PREVIEW = 'unpublish_preview',
+    UNPUBLISH_CUSTOM = 'unpublish_custom',
 }
 
-export interface PublishState {
-    status: PublishStatus;
+export enum DeploymentStatus {
+    IN_PROGRESS = 'in_progress',
+    COMPLETED = 'completed',
+    FAILED = 'failed',
+}
+
+export interface DeploymentState {
+    status: DeploymentStatus;
     message: string | null;
     buildLog: string | null;
     error: string | null;
@@ -33,30 +39,37 @@ export interface VerifyDomainResponse {
     message?: string;
 }
 
-export interface PublishRequest {
-    buildScript: string;
-    urls: string[];
-    options?: PublishOptions;
+export interface PublishResponse {
+    success: boolean;
+    message: string;
 }
 
-export interface PublishOptions {
-    skipBuild?: boolean;
-    skipBadge?: boolean;
-    buildFlags?: string;
+export enum HostingProvider {
+    FREESTYLE = 'freestyle',
+}
+
+export interface DeploymentFile {
+    content: string;
+    encoding?: 'utf-8' | 'base64';
+}
+
+export interface DeploymentConfig {
+    domains: string[];
+    entrypoint?: string;
     envVars?: Record<string, string>;
 }
 
-export interface UnpublishRequest {
-    urls: string[];
+export interface DeploymentRequest {
+    files: Record<string, DeploymentFile>;
+    config: DeploymentConfig;
 }
 
-export interface PublishResponse {
+export interface DeploymentResponse {
+    deploymentId: string;
     success: boolean;
     message?: string;
 }
 
-export interface GetOwnedDomainsResponse {
-    success: boolean;
-    message?: string;
-    domains?: string[];
+export interface HostingProviderAdapter {
+    deploy(request: DeploymentRequest): Promise<DeploymentResponse>;
 }

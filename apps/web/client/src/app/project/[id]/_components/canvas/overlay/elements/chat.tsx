@@ -1,12 +1,11 @@
-import { ChatType } from '@/app/api/chat/route';
 import { useChatContext } from '@/app/project/[id]/_hooks/use-chat';
 import { useEditorEngine } from '@/components/store/editor';
 import type { ClickRectState } from '@/components/store/editor/overlay/state';
-import { useUserManager } from '@/components/store/user';
 import { transKeys } from '@/i18n/keys';
-import { EditorMode, EditorTabValue } from '@onlook/models';
+import { api } from '@/trpc/react';
+import { ChatType, EditorMode, EditorTabValue } from '@onlook/models';
 import { Button } from '@onlook/ui/button';
-import { Icons } from '@onlook/ui/icons/index';
+import { Icons } from '@onlook/ui/icons';
 import { Textarea } from '@onlook/ui/textarea';
 import { cn } from '@onlook/ui/utils';
 import { observer } from 'mobx-react-lite';
@@ -31,7 +30,7 @@ const DEFAULT_INPUT_STATE = {
 export const OverlayChat = observer(
     ({ selectedEl, elementId }: { selectedEl: ClickRectState | null; elementId: string }) => {
         const editorEngine = useEditorEngine();
-        const userManager = useUserManager();
+        const { data: settings } = api.user.settings.get.useQuery();
         const { sendMessages, reload, isWaiting } = useChatContext();
         const isPreviewMode = editorEngine.state.editorMode === EditorMode.PREVIEW;
         const [inputState, setInputState] = useState(DEFAULT_INPUT_STATE);
@@ -43,7 +42,7 @@ export const OverlayChat = observer(
             !selectedEl ||
             isPreviewMode ||
             isWaiting ||
-            !userManager.settings.settings?.chat?.showMiniChat;
+            !settings?.chat?.showMiniChat;
 
         useEffect(() => {
             setInputState(DEFAULT_INPUT_STATE);
@@ -84,9 +83,9 @@ export const OverlayChat = observer(
         const handleSubmit = async () => {
             const messageToSend = inputState.value;
             editorEngine.state.rightPanelTab = EditorTabValue.CHAT;
-            const streamMessages = await editorEngine.chat.getStreamMessages(messageToSend);
+            const streamMessages = await editorEngine.chat.getEditMessages(messageToSend);
             if (!streamMessages) {
-                console.error('No stream messages');
+                console.error('No edit messages returned');
                 return;
             }
             sendMessages(streamMessages, ChatType.EDIT);

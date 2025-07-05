@@ -1,12 +1,11 @@
 import { useEditorEngine } from '@/components/store/editor';
-import { useProjectManager } from '@/components/store/project';
 import type { PageNode } from '@onlook/models/pages';
 import { Button } from '@onlook/ui/button';
-import { Icons } from '@onlook/ui/icons/index';
+import { Icons } from '@onlook/ui/icons';
 import { Input } from '@onlook/ui/input';
 import { Tooltip, TooltipContent, TooltipPortal, TooltipTrigger } from '@onlook/ui/tooltip';
 import { observer } from 'mobx-react-lite';
-import { useMemo, useRef, useState, useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { type NodeApi, Tree, type TreeApi } from 'react-arborist';
 import useResizeObserver from 'use-resize-observer';
 import { PageTreeNode } from '../layers-tab/tree/page-tree-node';
@@ -15,7 +14,6 @@ import { PageModal } from './page-modal';
 
 export const PagesTab = observer(() => {
     const editorEngine = useEditorEngine();
-    const projectManager = useProjectManager();
     const { ref, width, height } = useResizeObserver();
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -25,7 +23,7 @@ export const PagesTab = observer(() => {
 
     useEffect(() => {
         editorEngine.pages.scanPages();
-    }, [projectManager.project?.id]);
+    }, []);
 
     const filteredPages = useMemo(() => {
         if (!searchQuery.trim()) {
@@ -110,7 +108,7 @@ export const PagesTab = observer(() => {
 
     const dimensions = useMemo(
         () => ({
-            height: Math.max((height ?? 8) - 16, 100),
+            height: Math.max((height ?? 8) - 32, 100),
             width: width ?? 365,
         }),
         [height, width],

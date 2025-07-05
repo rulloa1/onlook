@@ -1,9 +1,10 @@
 import imageCompression from 'browser-image-compression';
 
-export async function compressImage(file: File): Promise<string | undefined> {
+// Browser-side image compression
+export async function compressImageInBrowser(file: File): Promise<string | undefined> {
     const options = {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1024,
+        maxSizeMB: 2,
+        maxWidthOrHeight: 2048,
     };
 
     try {
@@ -24,4 +25,41 @@ export function base64ToBlob(base64: string, mimeType: string): Blob {
         ia[i] = byteString.charCodeAt(i);
     }
     return new Blob([ab], { type: mimeType });
+}
+
+export function addBase64Prefix(mimeType: string, base64: string): string {
+    if (base64.startsWith('data:')) {
+        // If the base64 already has a prefix, return it
+        return base64;
+    }
+    return `data:${mimeType};base64,${base64}`;
+}
+
+/**
+ * Converts a CSS background-image URL from full URL to relative path
+ * Example: url("https://xxx-3000.csb.app/images/a.jpg") -> url("/images/c.jpg")
+ */
+export function urlToRelativePath(url: string): string {
+    const urlMatch = url.match(/url\s*\(\s*["']?([^"')]+)["']?\s*\)/);
+
+    // If it's not a url() function or no URL found, return as is
+    if (!urlMatch || !urlMatch[1]) {
+        return url;
+    }
+
+    const fullUrl = urlMatch[1];
+
+    // Extract the pathname (e.g., "/images/c.jpg")
+    try {
+        const newUrl = new URL(fullUrl);
+        return `url('${newUrl.pathname}')`;
+    } catch (error) {
+        return url;
+    }
+}
+
+export function canHaveBackgroundImage(tagName: string): boolean {
+    const tag = tagName.toLowerCase();
+    const backgroundElements = ['div', 'section', 'header', 'footer', 'main', 'article', 'aside'];
+    return backgroundElements.includes(tag);
 }

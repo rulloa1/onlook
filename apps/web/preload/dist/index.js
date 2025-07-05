@@ -1733,6 +1733,7 @@ var INLINE_ONLY_CONTAINERS = new Set([
   "wbr"
 ]);
 // ../../../packages/constants/src/editor.ts
+var CUSTOM_OUTPUT_DIR = ".next-prod";
 var DefaultSettings = {
   SCALE: 0.7,
   PAN_POSITION: { x: 175, y: 100 },
@@ -1749,7 +1750,7 @@ var DefaultSettings = {
     build: "bun run build",
     install: "bun install"
   },
-  IMAGE_FOLDER: "public/images",
+  IMAGE_FOLDER: "public",
   IMAGE_DIMENSION: { width: "100px", height: "100px" },
   FONT_FOLDER: "public/fonts",
   FONT_CONFIG: "app/fonts.ts",
@@ -1757,15 +1758,24 @@ var DefaultSettings = {
   CHAT_SETTINGS: {
     showSuggestions: true,
     autoApplyCode: true,
-    expandCodeBlocks: true,
+    expandCodeBlocks: false,
     showMiniChat: true
   },
   EDITOR_SETTINGS: {
-    shouldWarnDelete: true,
+    shouldWarnDelete: false,
     enableBunReplace: true,
     buildFlags: "--no-lint"
   }
 };
+// ../../../packages/constants/src/files.ts
+var BASE_EXCLUDED_DIRECTORIES = ["node_modules", "dist", "build", ".git", ".next"];
+var EXCLUDED_SYNC_DIRECTORIES = [
+  ...BASE_EXCLUDED_DIRECTORIES,
+  "static",
+  CUSTOM_OUTPUT_DIR
+];
+var IGNORED_UPLOAD_DIRECTORIES = [...BASE_EXCLUDED_DIRECTORIES, CUSTOM_OUTPUT_DIR];
+var EXCLUDED_PUBLISH_DIRECTORIES = [...BASE_EXCLUDED_DIRECTORIES, "coverage"];
 // ../../../packages/constants/src/language.ts
 var LANGUAGE_DISPLAY_NAMES = {
   ["en" /* English */]: "English",
@@ -1821,6 +1831,18 @@ function getInstanceId(node) {
   return node.getAttribute("data-oiid" /* DATA_ONLOOK_INSTANCE_ID */);
 }
 
+// script/api/events/publish.ts
+function publishDomProcessed(layerMap, rootNode) {
+  if (!penpalParent)
+    return;
+  penpalParent.onDomProcessed({
+    layerMap: Object.fromEntries(layerMap),
+    rootNode
+  }).catch((error) => {
+    console.error("Failed to send DOM processed event:", error);
+  });
+}
+
 // script/api/state.ts
 function setFrameId(frameId) {
   window._onlookFrameId = frameId;
@@ -1838,37 +1860,31 @@ function getFrameId() {
 }
 
 // script/api/dom.ts
-var processDebounced = import_debounce.default(async (root) => {
-  const frameId = await getFrameId();
+function processDomDebounced(root = document.body) {
+  const frameId = getFrameId();
   if (!frameId) {
     console.warn("frameView id not found, skipping dom processing");
-    return false;
+    return null;
   }
   const layerMap = buildLayerTree(root);
   if (!layerMap) {
     console.warn("Error building layer tree, root element is null");
-    return false;
+    return null;
   }
   const rootDomId = root.getAttribute("data-odid" /* DATA_ONLOOK_DOM_ID */);
   if (!rootDomId) {
     console.warn("Root dom id not found");
-    return false;
+    return null;
   }
   const rootNode = layerMap.get(rootDomId);
   if (!rootNode) {
     console.warn("Root node not found");
-    return false;
+    return null;
   }
-  return true;
-}, 500);
-function processDom(root = document.body) {
-  if (!getFrameId()) {
-    console.warn("frameView id not found, skipping dom processing");
-    return false;
-  }
-  processDebounced(root);
-  return true;
+  publishDomProcessed(layerMap, rootNode);
+  return { rootDomId, layerMap: Array.from(layerMap.entries()) };
 }
+var processDom = import_debounce.default(processDomDebounced, 500);
 function buildLayerTree(root) {
   if (!isValidHtmlElement(root)) {
     return null;
@@ -2178,25 +2194,39 @@ function groupElements(parent2, container, children) {
     element.style.display = "none";
     removeIdsFromChildElement(element);
   });
-  return getDomElement(containerEl, true);
+  const domEl = getDomElement(containerEl, true);
+  return {
+    domEl,
+    newMap: buildLayerTree(containerEl)
+  };
 }
 function ungroupElements(parent2, container) {
   const parentEl = getHtmlElement(parent2.domId);
   if (!parentEl) {
-    console.warn("Failed to find parent element", parent2.domId);
+    console.warn(`Parent element not found: ${parent2.domId}`);
     return null;
   }
-  const containerEl = Array.from(parentEl.children).find((child2) => child2.getAttribute("data-odid" /* DATA_ONLOOK_DOM_ID */) === container.domId);
+  let containerEl;
+  if (container.domId) {
+    containerEl = getHtmlElement(container.domId);
+  } else {
+    console.warn(`Container domId is required for ungrouping`);
+    return null;
+  }
   if (!containerEl) {
-    console.warn("Failed to find container element", parent2.domId);
+    console.warn(`Container element not found for ungrouping`);
     return null;
   }
-  Array.from(containerEl.children).forEach((child2) => {
-    child2.setAttribute("data-onlook-inserted" /* DATA_ONLOOK_INSERTED */, "true");
-    parentEl.insertBefore(child2, containerEl);
+  const children = Array.from(containerEl.children);
+  children.forEach((child2) => {
+    parentEl.appendChild(child2);
   });
-  containerEl.style.display = "none";
-  return getDomElement(parentEl, true);
+  containerEl.remove();
+  const domEl = getDomElement(parentEl, true);
+  return {
+    domEl,
+    newMap: buildLayerTree(parentEl)
+  };
 }
 function createContainerElement(target) {
   const containerEl = document.createElement(target.tagName);
@@ -12451,7 +12481,11 @@ function insertElement(element, location) {
       assertNever(location);
   }
   const domEl = getDomElement(newEl, true);
-  return domEl;
+  const newMap = buildLayerTree(newEl);
+  return {
+    domEl,
+    newMap
+  };
 }
 function createElement(element) {
   const newEl = document.createElement(element.tagName);
@@ -12500,7 +12534,11 @@ function removeElement(location) {
   if (elementToRemove) {
     const domEl = getDomElement(elementToRemove, true);
     elementToRemove.style.display = "none";
-    return domEl;
+    const newMap = targetEl.parentElement ? buildLayerTree(targetEl.parentElement) : null;
+    return {
+      domEl,
+      newMap
+    };
   } else {
     console.warn(`No element found to remove at the specified location`);
     return null;
@@ -12554,7 +12592,11 @@ function moveElement(domId, newIndex) {
     return null;
   }
   const domEl = getDomElement(movedEl, true);
-  return domEl;
+  const newMap = movedEl.parentElement ? buildLayerTree(movedEl.parentElement) : null;
+  return {
+    domEl,
+    newMap
+  };
 }
 function getElementIndex(domId) {
   const el = getHtmlElement(domId);
@@ -12870,16 +12912,6 @@ function endAllDrag() {
   removeStub();
 }
 
-// script/api/events/publish.ts
-function publishEditText(domEl) {
-  const parent2 = getHtmlElement(domEl.domId)?.parentElement;
-  const layerMap = parent2 ? buildLayerTree(parent2) : null;
-  if (!domEl || !layerMap) {
-    console.warn("No domEl or layerMap found for edit text event");
-    return;
-  }
-}
-
 // script/api/elements/text.ts
 function startEditingText(domId) {
   const el = getHtmlElement(domId);
@@ -12889,16 +12921,19 @@ function startEditingText(domId) {
   }
   const childNodes = Array.from(el.childNodes).filter((node) => node.nodeType !== Node.COMMENT_NODE);
   let targetEl = null;
+  const hasOnlyTextAndBreaks = childNodes.every((node) => node.nodeType === Node.TEXT_NODE || node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === "br");
   if (childNodes.length === 0) {
     targetEl = el;
-  } else if (childNodes.length === 1 && el.childNodes[0]?.nodeType === Node.TEXT_NODE) {
+  } else if (childNodes.length === 1 && childNodes[0]?.nodeType === Node.TEXT_NODE) {
+    targetEl = el;
+  } else if (hasOnlyTextAndBreaks) {
     targetEl = el;
   }
   if (!targetEl) {
     console.warn("Start editing text failed. No target element found for selector:", domId);
     return null;
   }
-  const originalContent = el.textContent || "";
+  const originalContent = extractTextContent(el);
   prepareElementForEditing(targetEl);
   return { originalContent };
 }
@@ -12910,7 +12945,10 @@ function editText(domId, content) {
   }
   prepareElementForEditing(el);
   updateTextContent(el, content);
-  return getDomElement(el, true);
+  return {
+    domEl: getDomElement(el, true),
+    newMap: buildLayerTree(el)
+  };
 }
 function stopEditingText(domId) {
   const el = getHtmlElement(domId);
@@ -12919,8 +12957,7 @@ function stopEditingText(domId) {
     return null;
   }
   cleanUpElementAfterEditing(el);
-  publishEditText(getDomElement(el, true));
-  return { newContent: el.textContent || "", domEl: getDomElement(el, true) };
+  return { newContent: extractTextContent(el), domEl: getDomElement(el, true) };
 }
 function prepareElementForEditing(el) {
   el.setAttribute("data-onlook-editing-text" /* DATA_ONLOOK_EDITING_TEXT */, "true");
@@ -12933,7 +12970,17 @@ function removeEditingAttributes(el) {
   el.removeAttribute("data-onlook-editing-text" /* DATA_ONLOOK_EDITING_TEXT */);
 }
 function updateTextContent(el, content) {
-  el.textContent = content;
+  const htmlContent = content.replace(/\n/g, "<br>");
+  el.innerHTML = htmlContent;
+}
+function extractTextContent(el) {
+  let content = el.innerHTML;
+  content = content.replace(/<br\s*\/?>/gi, `
+`);
+  content = content.replace(/<[^>]*>/g, "");
+  const textArea = document.createElement("textarea");
+  textArea.innerHTML = content;
+  return textArea.value;
 }
 function isChildTextEditable(oid) {
   return true;
@@ -12948,75 +12995,63 @@ function listenForDomMutation() {
     let removed = new Map;
     for (const mutation of mutationsList) {
       if (mutation.type === "childList") {
-        const parent2 = mutation.target;
-        for (const node of mutation.addedNodes) {
-          if (node.nodeType === Node.TEXT_NODE || shouldIgnoreMutatedNode(node)) {
-            continue;
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute("data-odid" /* DATA_ONLOOK_DOM_ID */)) {
+            const parent2 = node.parentElement;
+            if (parent2) {
+              const layerMap = buildLayerTree(parent2);
+              if (layerMap) {
+                added = new Map([...added, ...layerMap]);
+              }
+            }
           }
-          const element = node;
-          dedupNewElement(element);
-          const layerMap = buildLayerTree(parent2);
-          if (layerMap) {
-            added = new Map([...added, ...layerMap]);
+        });
+        mutation.removedNodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute("data-odid" /* DATA_ONLOOK_DOM_ID */)) {
+            const parent2 = node.parentElement;
+            if (parent2) {
+              const layerMap = buildLayerTree(parent2);
+              if (layerMap) {
+                removed = new Map([...removed, ...layerMap]);
+              }
+            }
           }
-        }
-        for (const node of mutation.removedNodes) {
-          if (node.nodeType === Node.TEXT_NODE || shouldIgnoreMutatedNode(node)) {
-            continue;
-          }
-          const layerMap = buildLayerTree(parent2);
-          if (layerMap) {
-            removed = new Map([...removed, ...layerMap]);
-          }
-        }
+        });
+      }
+    }
+    if (added.size > 0 || removed.size > 0) {
+      if (penpalParent) {
+        penpalParent.onWindowMutated({
+          added: Object.fromEntries(added),
+          removed: Object.fromEntries(removed)
+        }).catch((error) => {
+          console.error("Failed to send window mutation event:", error);
+        });
       }
     }
   });
   observer.observe(targetNode, config);
 }
-function shouldIgnoreMutatedNode(node) {
-  if (node.id === "onlook-drag-stub" /* ONLOOK_STUB_ID */) {
-    return true;
+function listenForResize() {
+  function notifyResize() {
+    if (penpalParent) {
+      penpalParent.onWindowResized().catch((error) => {
+        console.error("Failed to send window resize event:", error);
+      });
+    }
   }
-  if (node.getAttribute("data-onlook-inserted" /* DATA_ONLOOK_INSERTED */)) {
-    return true;
-  }
-  return false;
-}
-function dedupNewElement(newEl) {
-  const oid = newEl.getAttribute("data-oid" /* DATA_ONLOOK_ID */);
-  if (!oid) {
-    return;
-  }
-  document.querySelectorAll(`[${"data-oid" /* DATA_ONLOOK_ID */}="${oid}"][${"data-onlook-inserted" /* DATA_ONLOOK_INSERTED */}]`).forEach((targetEl) => {
-    const ATTRIBUTES_TO_REPLACE = [
-      "data-odid" /* DATA_ONLOOK_DOM_ID */,
-      "data-onlook-drag-saved-style" /* DATA_ONLOOK_DRAG_SAVED_STYLE */,
-      "data-onlook-editing-text" /* DATA_ONLOOK_EDITING_TEXT */,
-      "data-oiid" /* DATA_ONLOOK_INSTANCE_ID */
-    ];
-    ATTRIBUTES_TO_REPLACE.forEach((attr) => {
-      const targetAttr = targetEl.getAttribute(attr);
-      if (targetAttr) {
-        newEl.setAttribute(attr, targetAttr);
-      }
-    });
-    targetEl.remove();
-  });
+  window.addEventListener("resize", notifyResize);
 }
 
 // script/api/events/index.ts
-function listenForEvents() {
-  listenForWindowEvents();
+function listenForDomChanges() {
   listenForDomMutation();
-}
-function listenForWindowEvents() {
-  window.addEventListener("resize", () => {});
+  listenForResize();
 }
 
 // script/api/ready.ts
 function handleBodyReady() {
-  listenForEvents();
+  listenForDomChanges();
   keepDomUpdated();
   cssManager.injectDefaultStyles();
 }
@@ -13028,7 +13063,7 @@ function keepDomUpdated() {
   }
   const interval = setInterval(() => {
     try {
-      if (processDom()) {
+      if (processDom() !== null) {
         clearInterval(interval);
         domUpdateInterval = null;
       }
@@ -17244,6 +17279,17 @@ var ChatSummarySchema = exports_external.object({
   userPreferences: exports_external.string().describe("Specific preferences the user has expressed about implementation, design, etc."),
   currentStatus: exports_external.string().describe("Current state of the project and any pending work")
 });
+// ../../../packages/models/src/llm/index.ts
+var BEDROCK_MODEL_MAP = {
+  ["claude-sonnet-4-20250514" /* SONNET_4 */]: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+  ["claude-3-7-sonnet-20250219" /* SONNET_3_7 */]: "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+  ["claude-3-5-haiku-20241022" /* HAIKU */]: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+};
+var VERTEX_MODEL_MAP = {
+  ["claude-sonnet-4-20250514" /* SONNET_4 */]: "claude-sonnet-4@20250514",
+  ["claude-3-7-sonnet-20250219" /* SONNET_3_7 */]: "claude-3-7-sonnet@20250219",
+  ["claude-3-5-haiku-20241022" /* HAIKU */]: "claude-3-5-haiku@20241022"
+};
 // script/api/theme/index.ts
 function getTheme() {
   try {
@@ -17270,13 +17316,24 @@ function setTheme(theme) {
 }
 
 // script/api/index.ts
-var preloadMethods = {
+function withTryCatch(fn) {
+  return (...args) => {
+    try {
+      return fn(...args);
+    } catch (error) {
+      console.error(`Error in ${fn.name}:`, error);
+      return null;
+    }
+  };
+}
+var rawMethods = {
   processDom,
   setFrameId,
   getComputedStyleByDomId,
   updateElementInstance,
   getFirstOnlookElement,
   captureScreenshot,
+  buildLayerTree,
   getElementAtLoc,
   getElementByDomId,
   getElementIndex,
@@ -17311,6 +17368,7 @@ var preloadMethods = {
   removeImage,
   handleBodyReady
 };
+var preloadMethods = Object.fromEntries(Object.entries(rawMethods).map(([key, fn]) => [key, withTryCatch(fn)]));
 
 // script/index.ts
 var penpalParent = null;
@@ -17359,5 +17417,5 @@ export {
   penpalParent
 };
 
-//# debugId=063B7F3A5134580A64756E2164756E21
+//# debugId=F6D252B04D910FD264756E2164756E21
 //# sourceMappingURL=index.js.map

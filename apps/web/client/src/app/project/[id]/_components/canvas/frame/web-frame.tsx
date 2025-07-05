@@ -47,9 +47,14 @@ export const WebFrameComponent = observer(
         const connectionRef = useRef<ReturnType<typeof connect> | null>(null);
 
         const reloadIframe = () => {
-            const iframe = iframeRef.current;
-            if (!iframe) return;
-            iframe.src = iframe.src;
+            try {
+                const iframe = iframeRef.current;
+                if (!iframe) return;
+                iframe.src = iframe.src;
+                iframe.contentWindow?.location.reload();
+            } catch (error) {
+                console.error('Failed to reload iframe', error);
+            }
         };
 
         const setupPenpalConnection = () => {
@@ -73,6 +78,15 @@ export const WebFrameComponent = observer(
                 messenger,
                 methods: {
                     getFrameId: () => frame.id,
+                    onWindowMutated: () => {
+                        editorEngine.frameEvent.handleWindowMutated();
+                    },
+                    onWindowResized: () => {
+                        editorEngine.frameEvent.handleWindowResized();
+                    },
+                    onDomProcessed: (data: { layerMap: Record<string, any>; rootNode: any }) => {
+                        editorEngine.frameEvent.handleDomProcessed(frame.id, data);
+                    },
                 } satisfies PenpalParentMethods,
             });
 
@@ -176,6 +190,7 @@ export const WebFrameComponent = observer(
                 isChildTextEditable: promisifyMethod(penpalChild?.isChildTextEditable),
                 handleBodyReady: promisifyMethod(penpalChild?.handleBodyReady),
                 captureScreenshot: promisifyMethod(penpalChild?.captureScreenshot),
+                buildLayerTree: promisifyMethod(penpalChild?.buildLayerTree),
             };
 
             // Register the iframe with the editor engine

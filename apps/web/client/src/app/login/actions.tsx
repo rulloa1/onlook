@@ -1,6 +1,5 @@
 'use server';
 
-import { Routes } from '@/utils/constants';
 import { createClient } from '@/utils/supabase/server';
 import { SEED_USER } from '@onlook/db';
 import { SignInMethod } from '@onlook/models';
@@ -42,9 +41,8 @@ export async function devLogin() {
 
     const supabase = await createClient();
 
-    const {
-        data: { session },
-    } = await supabase.auth.getSession();
+    const { data: { session } } = await supabase.auth.getSession();
+
     if (session) {
         redirect('/');
     }
@@ -58,6 +56,5 @@ export async function devLogin() {
         console.error('Error signing in with password:', error);
         throw new Error('Error signing in with password');
     }
-
-    redirect(Routes.HOME);
+    redirect('/');
 }

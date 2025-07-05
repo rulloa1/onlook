@@ -1,12 +1,12 @@
 'use client';
 
 import { api } from '@/trpc/react';
+import { Routes } from '@/utils/constants';
 import { Button } from '@onlook/ui/button';
-import { Icons } from '@onlook/ui/icons/index';
+import { Icons } from '@onlook/ui/icons';
+import { Skeleton } from '@onlook/ui/skeleton';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Skeleton } from '@onlook/ui/skeleton';
-import { Routes } from '@/utils/constants';
 
 export function Main({ invitationId }: { invitationId: string }) {
     const router = useRouter();
@@ -56,7 +56,7 @@ export function Main({ invitationId }: { invitationId: string }) {
         );
     }
 
-    const inviter = invitation.inviter.name ?? invitation.inviter.email;
+    const inviter = invitation.inviter.firstName ?? invitation.inviter.displayName ?? invitation.inviter.email;
 
     return (
         <div className="flex flex-row w-full">

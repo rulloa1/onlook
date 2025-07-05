@@ -1,79 +1,68 @@
-import type { ProjectManager } from '@/components/store/project/manager';
+import { DefaultSettings } from '@onlook/constants';
 import type { ActionTarget, ImageContentData, InsertImageAction } from '@onlook/models/actions';
-import { makeAutoObservable } from 'mobx';
+import {
+    convertToBase64,
+    getBaseName,
+    getDirName,
+    getMimeType,
+    isImageFile,
+} from '@onlook/utility/src/file';
+import { makeAutoObservable, reaction } from 'mobx';
 import type { EditorEngine } from '../engine';
-export class ImageManager {
-    private images: ImageContentData[] = [];
 
-    constructor(
-        private editorEngine: EditorEngine,
-        private projectManager: ProjectManager,
-    ) {
-        // this.scanImages();
+export class ImageManager {
+    private images: string[] = [];
+    private _isScanning = false;
+
+    constructor(private editorEngine: EditorEngine) {
         makeAutoObservable(this);
+
+        reaction(
+            () => this.editorEngine.sandbox.isIndexingFiles,
+            (isIndexingFiles) => {
+                if (!isIndexingFiles) {
+                    this.scanImages();
+                }
+            }
+        );
+
+        reaction(
+            () => this.editorEngine.sandbox.listBinaryFiles(DefaultSettings.IMAGE_FOLDER),
+            () => {
+                this.scanImages();
+            }
+        );
+
     }
 
-    async upload(file: File): Promise<void> {
+    async upload(file: File, destinationFolder: string): Promise<void> {
         try {
-            // const projectFolder = this.projectManager.project?.folderPath;
-            // if (!projectFolder) {
-            //     throw new Error('Project folder not found');
-            // }
-
-            // const buffer = await file.arrayBuffer();
-            // const base64String = btoa(
-            //     new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''),
-            // );
-
-            // await invokeMainChannel(MainChannels.SAVE_IMAGE_TO_PROJECT, {
-            //     projectFolder,
-            //     content: base64String,
-            //     fileName: file.name,
-            // });
-
-            // setTimeout(() => {
-            //     this.scanImages();
-            // }, 100);
-            // sendAnalytics('image upload');
+            const path = `${destinationFolder}/${file.name}`;
+            const uint8Array = new Uint8Array(await file.arrayBuffer());
+            await this.editorEngine.sandbox.writeBinaryFile(path, uint8Array);
+            this.scanImages();
         } catch (error) {
             console.error('Error uploading image:', error);
             throw error;
         }
     }
 
-    async delete(imageName: string): Promise<void> {
+    async delete(originPath: string): Promise<void> {
         try {
-            // const projectFolder = this.projectManager.project?.folderPath;
-            // if (!projectFolder) {
-            //     throw new Error('Project folder not found');
-            // }
-            // await invokeMainChannel<string, string>(
-            //     MainChannels.DELETE_IMAGE_FROM_PROJECT,
-            //     projectFolder,
-            //     imageName,
-            // );
-            // this.scanImages();
-            // sendAnalytics('image delete');
+            await this.editorEngine.sandbox.delete(originPath);
+            this.scanImages();
         } catch (error) {
             console.error('Error deleting image:', error);
             throw error;
         }
     }
 
-    async rename(imageName: string, newName: string): Promise<void> {
+    async rename(originPath: string, newName: string): Promise<void> {
         try {
-            // const projectFolder = this.projectManager.project?.folderPath;
-            // if (!projectFolder) {
-            //     throw new Error('Project folder not found');
-            // }
-            // await invokeMainChannel<string, string>(
-            //     MainChannels.RENAME_IMAGE_IN_PROJECT,
-            //     projectFolder,
-            //     imageName,
-            //     newName,
-            // );
-            // this.scanImages();
-            // sendAnalytics('image rename');
+            const basePath = getDirName(originPath);
+            const newPath = `${basePath}/${newName}`;
+            await this.editorEngine.sandbox.rename(originPath, newPath);
+            this.scanImages();
         } catch (error) {
             console.error('Error renaming image:', error);
             throw error;
@@ -124,6 +113,14 @@ export class ImageManager {
         return this.images;
     }
 
+    get isScanning() {
+        return this._isScanning;
+    }
+
+    find(url: string) {
+        return this.images.find((img) => url.includes(img));
+    }
+
     remove() {
         // this.editorEngine.style.update('backgroundImage', 'none');
         // sendAnalytics('image-removed');
@@ -145,26 +142,101 @@ export class ImageManager {
 
         return targets;
     }
+    scanImages() {
+        if (this._isScanning) {
+            return;
+        }
 
-    async scanImages() {
-        // const projectRoot = this.projectManager.project?.folderPath;
+        this._isScanning = true;
 
-        // if (!projectRoot) {
-        //     console.warn('No project root found');
-        //     return;
-        // }
-        // const images = await invokeMainChannel<string, ImageContentData[]>(
-        //     MainChannels.SCAN_IMAGES_IN_PROJECT,
-        //     projectRoot,
-        // );
-        // if (images?.length) {
-        //     this.images = images;
-        // } else {
-        //     this.images = [];
-        // }
+        try {
+            const files = this.editorEngine.sandbox.listBinaryFiles(
+                DefaultSettings.IMAGE_FOLDER,
+            );
+
+            if (files.length === 0) {
+                this.images = [];
+                return;
+            }
+
+            const imageFiles = files.filter((filePath: string) => isImageFile(filePath));
+
+
+            if (imageFiles.length === 0) {
+                return;
+            }
+
+            this.images = imageFiles;
+
+        } catch (error) {
+            console.error('Error scanning images:', error);
+            this.images = [];
+        } finally {
+            this._isScanning = false;
+        }
     }
 
     clear() {
         this.images = [];
+    }
+
+    /**
+     * Read content of a single image file
+     */
+    async readImageContent(imagePath: string): Promise<ImageContentData | null> {
+        try {
+            // Validate if the file is an image
+            if (!isImageFile(imagePath)) {
+                console.warn(`File ${imagePath} is not a valid image file`);
+                return null;
+            }
+
+            // Read the binary file using the sandbox
+            const binaryData = await this.editorEngine.sandbox.readBinaryFile(imagePath);
+            if (!binaryData) {
+                console.warn(`Failed to read binary data for ${imagePath}`);
+                return null;
+            }
+
+            // Determine MIME type based on file extension
+            const mimeType = getMimeType(imagePath);
+
+            // Convert binary data to base64
+            const base64Data = convertToBase64(binaryData);
+            const content = `data:${mimeType};base64,${base64Data}`;
+
+            return {
+                originPath: imagePath,
+                content,
+                fileName: getBaseName(imagePath),
+                mimeType,
+            } as ImageContentData;
+        } catch (error) {
+            console.error(`Error reading image content for ${imagePath}:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * Read content of multiple image files in parallel
+     */
+    async readImagesContent(imagePaths: string[]): Promise<ImageContentData[]> {
+        if (!imagePaths.length) {
+            return [];
+        }
+
+        try {
+            // Process all images in parallel
+            const imagePromises = imagePaths.map(path => this.readImageContent(path));
+            const results = await Promise.all(imagePromises);
+
+            // Filter out null results
+            const validImages = results.filter((result): result is ImageContentData => result !== null);
+
+            return validImages;
+        } catch (error) {
+            console.error('Error reading images content:', error);
+            return [];
+        }
     }
 }

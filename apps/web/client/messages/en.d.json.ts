@@ -36,7 +36,7 @@ declare const messages: {
             "lastEdited": "Last edited {time} ago"
         },
         "actions": {
-            "import": "Import",
+            "import": "Import Project",
             "close": "Close",
             "about": "About Onlook",
             "signOut": "Sign out",
@@ -229,6 +229,9 @@ declare const messages: {
                         "input": {
                             "placeholder": "Type your message...",
                             "tooltip": "Chat with AI about the selected element"
+                        },
+                        "mode": {
+                            "tooltip": "Switch between Build and Ask modes"
                         },
                         "controls": {
                             "newChat": "New Chat",

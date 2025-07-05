@@ -1,12 +1,12 @@
 'use client';
 
 import { Button } from '@onlook/ui/button';
-import { Icons } from '@onlook/ui/icons/index';
+import { Icons } from '@onlook/ui/icons';
 import { Popover, PopoverContent, PopoverTrigger } from '@onlook/ui/popover';
 import { useState } from 'react';
 import { MembersContent } from './members-content';
 
-export const Members = ({ projectId }: { projectId: string }) => {
+export const Members = () => {
     const [isOpen, setIsOpen] = useState(false);
 
     return (
@@ -17,7 +17,7 @@ export const Members = ({ projectId }: { projectId: string }) => {
                 </Button>
             </PopoverTrigger>
             <PopoverContent className="p-0 w-96" align="end">
-                <MembersContent projectId={projectId} />
+                <MembersContent />
             </PopoverContent>
         </Popover>
     );

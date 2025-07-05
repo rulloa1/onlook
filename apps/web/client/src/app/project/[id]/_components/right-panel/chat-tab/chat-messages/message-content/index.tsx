@@ -18,7 +18,9 @@ export const MessageContent = observer(
         if (!parts) {
             return null;
         }
-        return parts.map((part) => {
+        // Find the index of the last tool-invocation part
+        const lastToolInvocationIdx = parts.map(p => p.type).lastIndexOf('tool-invocation');
+        return parts.map((part, idx) => {
             if (part.type === 'text') {
                 return (
                     <MarkdownRenderer
@@ -32,9 +34,13 @@ export const MessageContent = observer(
             } else if (part.type === 'tool-invocation') {
                 return (
                     <ToolCallDisplay
-                        key={part.toolInvocation.toolCallId}
+                        messageId={messageId}
+                        index={idx}
+                        lastToolInvocationIdx={lastToolInvocationIdx}
                         toolInvocation={part.toolInvocation}
+                        key={part.toolInvocation.toolCallId}
                         isStream={isStream}
+                        applied={applied}
                     />
                 );
             } else if (part.type === 'reasoning') {
